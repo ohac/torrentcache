@@ -22,6 +22,20 @@ module TorrentCache
         status = res['files'][info_hash]
         [status['complete'], status['downloaded'], status['incomplete']]
       end
+
+      def handshake(ip, port, info_hash, peer_id)
+        pstr = 'BitTorrent protocol'
+        pstrlen = [pstr.size].pack('C')
+        reserved = "\000" * 8
+        packet = [pstrlen, pstr, reserved, info_hash, peer_id].join
+        TCPSocket.open(ip, port) do |sock|
+          sock.write(packet)
+          size = sock.read(1).unpack('C').first
+          recvpkt = sock.read(size + 49)
+p recvpkt
+        end
+      end
+
       def run
         # TODO
         torrentf = File.join(SETTING_DIR, 'test.torrent')
@@ -42,10 +56,13 @@ p scrape(announce, info_hash)
         }.map{|k,v|"#{k}=#{v}"}.join('&')
 
         res = open("#{announce}?#{params}"){|fd| BEncode.load(fd.read)}
-        peers = res['peers'].each_byte.each_slice(6).map{|i|i.pack('c*')}
+        peers_raw = res['peers'].each_byte.each_slice(6).map{|i|i.pack('c*')}
+        peers = peers_raw.map do |peer_raw|
+          ipp = peer_raw.unpack('C4n')
+          [ipp.take(4).join('.'), ipp.last]
+        end
         interval = res['interval']
-p peers.map{|i|i.unpack('C4n').join('.')}
-
+        handshake(*(peers.first + [info_hash, peer_id]))
       end
     end
   end

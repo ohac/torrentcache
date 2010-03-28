@@ -30,6 +30,14 @@ module TorrentCache
         plen + packet
       end
 
+      def read_message(sock)
+        size = sock.read(4).unpack('N').first
+        id_payload = size == 0 ? '' : sock.read(size)
+        id = id_payload[0, 1].unpack('C').first
+p [size, id, id_payload[1, [size, 40].min].unpack("C*").map{|v|"%02x" % v}.join]
+        id
+      end
+
       def handshake(ip, port, info_hash, peer_id)
         pstr = 'BitTorrent protocol'
         pstrlen = [pstr.size].pack('C')
@@ -38,10 +46,14 @@ module TorrentCache
         TCPSocket.open(ip, port) do |sock|
           sock.write(packet)
           size = sock.read(1).unpack('C').first
-          recvpkt = sock.read(size + 49)
+          recvpkt = sock.read(size + 48)
+          sock.write(message(2)) # interested
           loop do
-            sleep 30
-            sock.write(message)
+            id = read_message(sock)
+            if id == 1 # unchoke
+              sock.write(message(6, [0, 0, 8 * 1024].pack('NNN'))) # request
+            end
+#           sock.write(message) # keep-alive
           end
         end
       end

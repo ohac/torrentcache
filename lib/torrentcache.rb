@@ -23,10 +23,9 @@ module TorrentCache
         [status['complete'], status['downloaded'], status['incomplete']]
       end
 
-      def message
-        id = "\000" # keep alive
-        payload = ''
-        packet = id + payload
+      def message(id = nil, payload = '')
+        ids = id.nil? ? '' : [id].pack('C')
+        packet = ids + payload
         plen = [packet.size].pack('N')
         plen + packet
       end
@@ -40,7 +39,6 @@ module TorrentCache
           sock.write(packet)
           size = sock.read(1).unpack('C').first
           recvpkt = sock.read(size + 49)
-p recvpkt
           loop do
             sleep 30
             sock.write(message)

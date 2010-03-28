@@ -23,6 +23,14 @@ module TorrentCache
         [status['complete'], status['downloaded'], status['incomplete']]
       end
 
+      def message
+        id = "\000" # keep alive
+        payload = ''
+        packet = id + payload
+        plen = [packet.size].pack('N')
+        plen + packet
+      end
+
       def handshake(ip, port, info_hash, peer_id)
         pstr = 'BitTorrent protocol'
         pstrlen = [pstr.size].pack('C')
@@ -33,6 +41,10 @@ module TorrentCache
           size = sock.read(1).unpack('C').first
           recvpkt = sock.read(size + 49)
 p recvpkt
+          loop do
+            sleep 30
+            sock.write(message)
+          end
         end
       end
 

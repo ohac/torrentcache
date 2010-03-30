@@ -65,6 +65,7 @@ module TorrentCache
           #sock.write(message(1)) # unchoke
           # bitfield (all zero)
           sock.write(message(5, ([0] * ((pieces.size + 7) / 8)).pack('C*')))
+          req = 0
           loop do
             id, payload = read_message(sock)
             case id
@@ -72,8 +73,7 @@ module TorrentCache
               p :choke
             when 1 # unchoke
               p :unchoke
-              # request
-              sock.write(message(6, [cur_p, cur_o, blk_size].pack('NNN')))
+              req += 50
             when 2 # interested
               p :interested
             when 3 # not interested
@@ -90,25 +90,25 @@ module TorrentCache
               p :request
             when 7 # piece
               index, bgn = payload.unpack('NN')
+p [index, pieces.size]
               blk = payload[8, payload.size - 8]
-              cur_o += blk.size
-              if cur_o >= piece_length
-                cur_o = 0
-                sock.write(message(4, [cur_p].pack('N'))) # have
-                cur_p += 1
-                if cur_p >= pieces.size
-                  return
-                end
-              end
-p [cur_p, cur_o]
-              # request
-              sock.write(message(6, [cur_p, cur_o, blk_size].pack('NNN')))
+              req += 1
             when 8 # cancel
               p :cancel
             else
               #p :nil
             end
-#           sock.write(message) # keep-alive
+            while req > 0
+              break if cur_p >= pieces.size
+              req -= 1
+              sock.write(message(6, [cur_p, cur_o, blk_size].pack('NNN')))
+              cur_o += blk_size
+              if cur_o >= piece_length
+                cur_o = 0
+                sock.write(message(4, [cur_p].pack('N'))) # have
+                cur_p += 1
+              end
+            end
           end
         end
       end

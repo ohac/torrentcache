@@ -64,7 +64,10 @@ p [size, id, id_payload[1, [size, 40].min].unpack("C*").map{|v|"%02x" % v}.join]
         torrent = BEncode.load(File.read(torrentf))
         announce = torrent['announce']
         info = torrent['info']
-        total_size = info['files'].inject(0){|t,i| t + i['length']}
+        total_size = info['length']
+        if total_size.nil?
+          total_size = info['files'].inject(0){|t,i| t + i['length']}
+        end
         pieces = info['pieces'].each_byte.each_slice(20).map{|cs|cs.pack('c*')}
         piece_length = info['piece length']
         info_hash = Digest::SHA1.digest(BEncode.dump(info))

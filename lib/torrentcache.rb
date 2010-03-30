@@ -31,27 +31,82 @@ module TorrentCache
       end
 
       def read_message(sock)
-        size = sock.read(4).unpack('N').first
-        id_payload = size == 0 ? '' : sock.read(size)
-        id = id_payload[0, 1].unpack('C').first
-p [size, id, id_payload[1, [size, 40].min].unpack("C*").map{|v|"%02x" % v}.join]
-        id
+        pkt = sock.read(4)
+        return nil if pkt.nil?
+        size = pkt.unpack('N').first
+        if size > 0
+          id_payload = sock.read(size)
+          id = id_payload[0, 1].unpack('C').first
+          payload = id_payload[1, size - 1]
+          [id, payload]
+        end
       end
 
-      def handshake(ip, port, info_hash, peer_id)
+      def show_have(have)
+        puts have.map{|i| i ? '1' : '0'}.join.to_i(2).to_s(16)
+      end
+
+      def handshake(ip, port, info_hash, peer_id, total_size, pieces,
+          piece_length)
+        have = [false] * pieces.size
+        peer_have = [false] * pieces.size
         pstr = 'BitTorrent protocol'
         pstrlen = [pstr.size].pack('C')
         reserved = "\000" * 8
         packet = [pstrlen, pstr, reserved, info_hash, peer_id].join
+        blk_size = 16 * 1024
+        cur_p = 0
+        cur_o = 0
         TCPSocket.open(ip, port) do |sock|
           sock.write(packet)
           size = sock.read(1).unpack('C').first
           recvpkt = sock.read(size + 48)
           sock.write(message(2)) # interested
+          #sock.write(message(1)) # unchoke
+          # bitfield (all zero)
+          sock.write(message(5, ([0] * ((pieces.size + 7) / 8)).pack('C*')))
           loop do
-            id = read_message(sock)
-            if id == 1 # unchoke
-              sock.write(message(6, [0, 0, 8 * 1024].pack('NNN'))) # request
+            id, payload = read_message(sock)
+            case id
+            when 0 # choke
+              p :choke
+            when 1 # unchoke
+              p :unchoke
+              # request
+              sock.write(message(6, [cur_p, cur_o, blk_size].pack('NNN')))
+            when 2 # interested
+              p :interested
+            when 3 # not interested
+              p :not_interested
+            when 4 # have
+              no = payload.unpack("N").first
+              peer_have[no] = true
+              show_have(peer_have)
+            when 5 # bitfield
+              bitstr = payload.unpack("C*").map{|i|"%08b" % i}.join
+              peer_have = bitstr.each_char.map{|i|i == '1'}
+              show_have(peer_have)
+            when 6 # request
+              p :request
+            when 7 # piece
+              index, bgn = payload.unpack('NN')
+              blk = payload[8, payload.size - 8]
+              cur_o += blk.size
+              if cur_o >= piece_length
+                cur_o = 0
+                sock.write(message(4, [cur_p].pack('N'))) # have
+                cur_p += 1
+                if cur_p >= pieces.size
+                  return
+                end
+              end
+p [cur_p, cur_o]
+              # request
+              sock.write(message(6, [cur_p, cur_o, blk_size].pack('NNN')))
+            when 8 # cancel
+              p :cancel
+            else
+              #p :nil
             end
 #           sock.write(message) # keep-alive
           end
@@ -87,7 +142,8 @@ p scrape(announce, info_hash)
           [ipp.take(4).join('.'), ipp.last]
         end
         interval = res['interval']
-        handshake(*(peers.first + [info_hash, peer_id]))
+        handshake(*(peers.first +
+            [info_hash, peer_id, total_size, pieces, piece_length]))
       end
     end
   end

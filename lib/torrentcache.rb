@@ -39,6 +39,8 @@ module TorrentCache
           id = id_payload[0, 1].unpack('C').first
           payload = id_payload[1, size - 1]
           [id, payload]
+        else
+          [-1]
         end
       end
 
@@ -48,6 +50,7 @@ module TorrentCache
 
       def handshake(ip, port, info_hash, peer_id, total_size, pieces,
           piece_length)
+p [ip, port]
         have = [false] * pieces.size
         peer_have = [false] * pieces.size
         pstr = 'BitTorrent protocol'
@@ -61,14 +64,16 @@ module TorrentCache
           sock.write(packet)
           size = sock.read(1).unpack('C').first
           recvpkt = sock.read(size + 48)
-          sock.write(message(2)) # interested
-          #sock.write(message(1)) # unchoke
           # bitfield (all zero)
           sock.write(message(5, ([0] * ((pieces.size + 7) / 8)).pack('C*')))
+          sock.write(message(2)) # interested
+          #sock.write(message(1)) # unchoke
           req = 0
           loop do
             id, payload = read_message(sock)
             case id
+            when -1 # keep-alive
+              p :keep_alive
             when 0 # choke
               p :choke
             when 1 # unchoke
@@ -96,7 +101,7 @@ p [index, pieces.size]
             when 8 # cancel
               p :cancel
             else
-              #p :nil
+              raise
             end
             while req > 0
               break if cur_p >= pieces.size
@@ -118,6 +123,7 @@ p [index, pieces.size]
         torrentf = File.join(SETTING_DIR, 'test.torrent')
         torrent = BEncode.load(File.read(torrentf))
         announce = torrent['announce']
+        exit if announce.empty? # tracker-less torrent is not supported
         info = torrent['info']
         total_size = info['length']
         if total_size.nil?
@@ -142,7 +148,7 @@ p scrape(announce, info_hash)
           [ipp.take(4).join('.'), ipp.last]
         end
         interval = res['interval']
-        handshake(*(peers.first +
+        handshake(*(peers.shuffle.first +
             [info_hash, peer_id, total_size, pieces, piece_length]))
       end
     end
